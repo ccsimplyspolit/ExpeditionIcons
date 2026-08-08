@@ -1,7 +1,28 @@
-# ExpeditionIcons
+# ExpeditionIcons — PoE2
 
-If you like it, you can donate via:
+Expedition encounter overlay and optional path planner for ExileCore2.
 
-BTC: bc1qke67907s6d5k3cm7lx7m020chyjp9e8ysfwtuz
+## What it does
 
-ETH: 0x3A37B3f57453555C2ceabb1a2A4f55E0eB969105 
+- Classifies PoE2 Expedition markers, chests, relics, detonator state, and
+  encounter metadata.
+- Draws world icons, labels, explosive radii, minimap/large-map markers, and
+  optional planner routes.
+- Scores routes with user-configured terrain, distance, and loot weights.
+
+## Logic
+
+`Initialise` loads icons/settings and registers lifecycle handlers. `Tick`
+refreshes encounter state and map geometry. A planner request snapshots the
+current encounter and runs on a cancellable worker; a validated result is
+published back to the main thread. `Render` consumes the snapshot and draws the
+icons/radii/route. Area changes, disable, hot reload, and dispose cancel workers
+and clear stale state. It is read-only and performs no game input.
+
+## Status
+
+Build: **PASS**. Classification: **CURRENT_WITH_WARNINGS**; a live current-league
+Expedition and logbook test is still required.
+
+Detailed report: [PoE2 plugin catalog](../../README.md) ·
+[audit](../../../docs/plugins/ExpeditionIcons/AUDIT.md).
