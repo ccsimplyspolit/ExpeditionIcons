@@ -86,7 +86,7 @@ public class ExpeditionIcons : BaseSettingsPlugin<ExpeditionIconsSettings>
     }
 
     private Entity DetonatorEntity =>
-        GameController.EntityListWrapper.ValidEntitiesByType[EntityType.IngameIcon]
+        ValidEntitiesOfType(EntityType.IngameIcon)
             .FirstOrDefault(x => x.Path == "Metadata/MiscellaneousObjects/Expedition/ExpeditionDetonator" ||
                                  x.Path == "Metadata/MiscellaneousObjects/Expedition/ExpeditionDetonatorTreasureIsland");
 
@@ -95,7 +95,7 @@ public class ExpeditionIcons : BaseSettingsPlugin<ExpeditionIconsSettings>
 
     private Vector2i? PlacementIndicatorPos =>
         ExpeditionInfo.IsExplosivePlacementActive
-            ? GameController.EntityListWrapper.ValidEntitiesByType[EntityType.MiscellaneousObjects]
+            ? ValidEntitiesOfType(EntityType.MiscellaneousObjects)
                   .FirstOrDefault(x => x.Path == "Metadata/MiscellaneousObjects/Expedition/ExpeditionPlacementIndicator")?.GridPos.RoundToVector2I() ??
               ExpeditionInfo.PlacementIndicatorGridPosition
             : null;
@@ -337,7 +337,7 @@ public class ExpeditionIcons : BaseSettingsPlugin<ExpeditionIconsSettings>
         _largeMapOpen = largeMap.IsVisible;
         _mapScale = GameController.IngameState.Camera.Height / 677f * largeMap.Zoom;
         _mapCenter = largeMap.GetClientRect().TopLeft + largeMap.Shift + largeMap.DefaultShift;
-        _playerZ = GameController.Player.GetComponent<Render>().Z;
+        _playerZ = GameController.Player.GetComponent<Render>()?.Z ?? float.NaN;
         if (!double.IsFinite(_mapScale) || _mapScale <= 0 || !IsFinite(_mapCenter) || !float.IsFinite(_playerZ))
             return;
 
@@ -353,8 +353,8 @@ public class ExpeditionIcons : BaseSettingsPlugin<ExpeditionIconsSettings>
         if (!float.IsFinite(_explosiveRadius) || _explosiveRadius <= 0 || !float.IsFinite(_explosiveRange) || _explosiveRange <= 0)
             return;
 
-        foreach (var entity in new[] { EntityType.IngameIcon, EntityType.Terrain }
-                     .SelectMany(x => GameController.EntityListWrapper.ValidEntitiesByType[x]))
+        foreach (var entity in ValidEntitiesOfType(EntityType.IngameIcon)
+                     .Concat(ValidEntitiesOfType(EntityType.Terrain)))
         {
             if (GetEntityType(entity.Path) != ExpeditionEntityType.None)
             {
@@ -543,7 +543,7 @@ public class ExpeditionIcons : BaseSettingsPlugin<ExpeditionIconsSettings>
             StartSearch();
         }
 
-        var explosives3D = GameController.EntityListWrapper.ValidEntitiesByType[EntityType.IngameIcon]
+        var explosives3D = ValidEntitiesOfType(EntityType.IngameIcon)
             .Where(x => x.Path == ExplosivePath)
             .Select(x => x.Pos)
             .ToList();
@@ -715,6 +715,17 @@ public class ExpeditionIcons : BaseSettingsPlugin<ExpeditionIconsSettings>
                 radius: _explosiveRadius,
                 color: Settings.PlannerSettings.ExplosiveColor.Value);
         }
+    }
+
+    private IEnumerable<Entity> ValidEntitiesOfType(EntityType type)
+    {
+        if (GameController.EntityListWrapper?.ValidEntitiesByType is not { } byType ||
+            !byType.TryGetValue(type, out var entities) || entities is null)
+        {
+            return Enumerable.Empty<Entity>();
+        }
+
+        return entities;
     }
 
     private void ShowSearchWindow(PathPlanner.DetailedLootScore score)

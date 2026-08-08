@@ -19,6 +19,11 @@ published back to the main thread. `Render` consumes the snapshot and draws the
 icons/radii/route. Area changes, disable, hot reload, and dispose cancel workers
 and clear stale state. It is read-only and performs no game input.
 
+Entity reads fail closed when ExileCore2 has not populated an `EntityType` bucket
+yet, which is common during startup and area transitions. Cancelling a planner
+also suppresses its completion sound, so stopping a search or unloading the
+plugin cannot report a false successful route.
+
 ## Status
 
 Build: **PASS**. Classification: **CURRENT_WITH_WARNINGS**; a live current-league

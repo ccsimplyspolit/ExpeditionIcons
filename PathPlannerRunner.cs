@@ -101,7 +101,7 @@ public class PathPlannerRunner
         finally
         {
             DebugWindow.LogMsg("ExpeditionIcons PathPlanner finished.");
-            if (settings.PlaySoundOnFinish)
+            if (settings.PlaySoundOnFinish && !_cts.IsCancellationRequested)
             {
                 soundController.PlaySound(SoundId);
             }
