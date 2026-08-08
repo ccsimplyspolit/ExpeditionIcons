@@ -14,6 +14,8 @@ namespace ExpeditionIcons;
 
 public class PathPlannerRunner
 {
+    public const string SoundId = "ExpeditionIcons:attention";
+
     private readonly CancellationTokenSource _cts = new CancellationTokenSource();
     public bool IsRunning => _task is { IsCompleted: false };
     private PathPlanner _pathPlanner;
@@ -101,7 +103,7 @@ public class PathPlannerRunner
             DebugWindow.LogMsg("ExpeditionIcons PathPlanner finished.");
             if (settings.PlaySoundOnFinish)
             {
-                soundController.PlaySound("expedition_attention");
+                soundController.PlaySound(SoundId);
             }
 
             _ = CurrentBestPath;

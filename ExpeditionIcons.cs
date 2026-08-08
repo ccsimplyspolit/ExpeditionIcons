@@ -62,6 +62,8 @@ public class ExpeditionIcons : BaseSettingsPlugin<ExpeditionIconsSettings>
     private List<Vector2> _editedPath;
     private int? _editedIndex = null;
     private PathPlanner.DetailedLootScore _editedPathEval;
+    private readonly Dictionary<HotkeyNodeV2, Action> _hotkeyHandlers = new();
+    private bool _settingsHooksAttached;
     private PathPlanner.DetailedLootScore EditedOrNativeScore => _editedPathEval ?? _plannerRunner?.CurrentBestPath;
 
     private Camera Camera => GameController.Game.IngameState.Camera;
@@ -104,22 +106,67 @@ public class ExpeditionIcons : BaseSettingsPlugin<ExpeditionIconsSettings>
 
     public override bool Initialise()
     {
-        GameController.SoundController.PreloadSound("expedition_attention", Path.Join(DirectoryFullName, "attention.wav"));
+        var soundPath = Path.Join(DirectoryFullName, "attention.wav");
+        if (File.Exists(soundPath))
+            GameController.SoundController.PreloadSound(PathPlannerRunner.SoundId, soundPath);
         Graphics.InitImage(TextureName);
         IconPickerDrawer.Instance._iconsImageId = Graphics.GetTextureId(TextureName);
         Settings.PlannerSettings.StartSearch.OnPressed += StartSearch;
         Settings.PlannerSettings.StopSearch.OnPressed += StopSearch;
         Settings.PlannerSettings.ClearSearch.OnPressed += ClearSearch;
+        Settings.Enable.OnValueChanged += OnEnableChanged;
+        _settingsHooksAttached = true;
         RegisterHotkey(Settings.PlannerSettings.StartSearchHotkey);
         RegisterHotkey(Settings.PlannerSettings.StopSearchHotkey);
         RegisterHotkey(Settings.PlannerSettings.ClearSearchHotkey);
         return base.Initialise();
     }
 
-    private static void RegisterHotkey(HotkeyNode hotkey)
+    private void RegisterHotkey(HotkeyNodeV2 hotkey)
     {
-        Input.RegisterKey(hotkey);
-        hotkey.OnValueChanged += () => { Input.RegisterKey(hotkey); };
+        Input.RegisterKey(hotkey.Value);
+        Action handler = () => Input.RegisterKey(hotkey.Value);
+        hotkey.OnValueChanged += handler;
+        _hotkeyHandlers[hotkey] = handler;
+    }
+
+    private void OnEnableChanged(object _, bool enabled)
+    {
+        if (enabled) return;
+        StopSearch();
+        _cachedEntities.Clear();
+        _detonatorPos = null;
+        _zoneCleared = false;
+    }
+
+    public override void OnPluginDestroyForHotReload()
+    {
+        DetachSettingsHooks();
+        StopSearch();
+        base.OnPluginDestroyForHotReload();
+    }
+
+    public override void Dispose()
+    {
+        DetachSettingsHooks();
+        StopSearch();
+        base.Dispose();
+    }
+
+    private void DetachSettingsHooks()
+    {
+        if (_settingsHooksAttached)
+        {
+            Settings.PlannerSettings.StartSearch.OnPressed -= StartSearch;
+            Settings.PlannerSettings.StopSearch.OnPressed -= StopSearch;
+            Settings.PlannerSettings.ClearSearch.OnPressed -= ClearSearch;
+            Settings.Enable.OnValueChanged -= OnEnableChanged;
+            _settingsHooksAttached = false;
+        }
+
+        foreach (var (hotkey, handler) in _hotkeyHandlers)
+            hotkey.OnValueChanged -= handler;
+        _hotkeyHandlers.Clear();
     }
 
     private void StopSearch()
@@ -208,13 +255,15 @@ public class ExpeditionIcons : BaseSettingsPlugin<ExpeditionIconsSettings>
     {
         const int segments = 90;
         const int segmentSpan = 360 / segments;
+        if (!float.IsFinite(radius) || radius <= 0) return;
         var playerPos = GameController.Player?.GetComponent<Positioned>()?.WorldPos;
-        if (playerPos == null)
+        if (playerPos == null || !IsFinite(playerPos.Value))
         {
             return;
         }
 
         foreach (var position in positions
+                     .Where(IsFinite)
                      .Where(x => playerPos.Value.Distance(new Vector2(x.X, x.Y)) < 80 * GridToWorldMultiplier + radius))
         {
             foreach (var segmentId in Enumerable.Range(0, segments))
@@ -225,12 +274,14 @@ public class ExpeditionIcons : BaseSettingsPlugin<ExpeditionIconsSettings>
                     var offset = new Vector2(cos, sin) * radius;
                     var xy = position.Xy() + offset;
                     var screen = Camera.WorldToScreen(ExpandWithTerrainHeight(xy.WorldToGrid()));
+                    if (!IsFinite(screen)) return (xy, new Vector2(float.NaN, float.NaN));
                     return (xy, screen);
                 }
 
                 var segmentOrigin = segmentId * segmentSpan;
                 var (w1, c1) = GetVector(segmentOrigin);
                 var (w2, c2) = GetVector(segmentOrigin + segmentSpan);
+                if (!IsFinite(c1) || !IsFinite(c2)) continue;
                 if (Settings.ExplosivesSettings.EnableExplosiveRadiusMerging)
                 {
                     if (positions
@@ -250,6 +301,9 @@ public class ExpeditionIcons : BaseSettingsPlugin<ExpeditionIconsSettings>
 
     public override void Tick()
     {
+        if (!Settings.Enable)
+            return;
+
         IconPickerDrawer.Instance._iconsImageId = Graphics.GetTextureId(TextureName);
         Settings.PlannerSettings.SearchState = _plannerRunner switch
         {
@@ -265,6 +319,7 @@ public class ExpeditionIcons : BaseSettingsPlugin<ExpeditionIconsSettings>
             return;
         }
 
+        if (!IsFinite(playerGridPos.Value)) return;
         _playerGridPos = playerGridPos.Value;
         if (detonatorPos is { Pos: var dp } && _playerGridPos.Distance(dp) < 90)
         {
@@ -283,6 +338,8 @@ public class ExpeditionIcons : BaseSettingsPlugin<ExpeditionIconsSettings>
         _mapScale = GameController.IngameState.Camera.Height / 677f * largeMap.Zoom;
         _mapCenter = largeMap.GetClientRect().TopLeft + largeMap.Shift + largeMap.DefaultShift;
         _playerZ = GameController.Player.GetComponent<Render>().Z;
+        if (!double.IsFinite(_mapScale) || _mapScale <= 0 || !IsFinite(_mapCenter) || !float.IsFinite(_playerZ))
+            return;
 
         _explosiveRadius = Settings.ExplosivesSettings.CalculateRadiusAutomatically
             //ReSharper disable once PossibleLossOfFraction
@@ -293,6 +350,8 @@ public class ExpeditionIcons : BaseSettingsPlugin<ExpeditionIconsSettings>
         //rounding here is extremely important to get right, this is taken from the game's code
         _explosiveRange = ExplosiveBaseRange * (100 + (GameController.IngameState.Data.MapStats?.GetValueOrDefault(GameStat.MapExpeditionMaximumPlacementDistancePct) ?? 0)) / 100 *
                           GridToWorldMultiplier;
+        if (!float.IsFinite(_explosiveRadius) || _explosiveRadius <= 0 || !float.IsFinite(_explosiveRange) || _explosiveRange <= 0)
+            return;
 
         foreach (var entity in new[] { EntityType.IngameIcon, EntityType.Terrain }
                      .SelectMany(x => GameController.EntityListWrapper.ValidEntitiesByType[x]))
@@ -461,6 +520,9 @@ public class ExpeditionIcons : BaseSettingsPlugin<ExpeditionIconsSettings>
 
     public override void Render()
     {
+        if (!Settings.Enable)
+            return;
+
         if (Settings.PlannerSettings.ClearSearchHotkey.PressedOnce())
         {
             ClearSearch();
@@ -624,11 +686,16 @@ public class ExpeditionIcons : BaseSettingsPlugin<ExpeditionIconsSettings>
                 var point = path[i].Point;
                 if (_largeMapOpen)
                 {
-                    Graphics.DrawLine(GetMapScreenPosition(prevPoint), GetMapScreenPosition(point), 1, Settings.PlannerSettings.MapLineColor);
+                    var mapPrev = GetMapScreenPosition(prevPoint);
+                    var mapPoint = GetMapScreenPosition(point);
+                    if (IsFinite(mapPrev) && IsFinite(mapPoint))
+                        Graphics.DrawLine(mapPrev, mapPoint, 1, Settings.PlannerSettings.MapLineColor);
                 }
 
                 var worldPos = GetWorldScreenPosition(point);
-                Graphics.DrawLine(GetWorldScreenPosition(prevPoint), worldPos, 1, Settings.PlannerSettings.WorldLineColor);
+                var worldPrev = GetWorldScreenPosition(prevPoint);
+                if (IsFinite(worldPrev) && IsFinite(worldPos))
+                    Graphics.DrawLine(worldPrev, worldPos, 1, Settings.PlannerSettings.WorldLineColor);
                 var text = $"#{i}";
                 using (Graphics.SetTextScale(Settings.PlannerSettings.TextMarkerScale))
                 {
@@ -638,10 +705,8 @@ public class ExpeditionIcons : BaseSettingsPlugin<ExpeditionIconsSettings>
                 }
             }
 
-            if (Settings.PlannerSettings.IsSearchRunning)
-            {
+            if (Settings.PlannerSettings.IsSearchRunning && double.IsFinite(score.TotalScore))
                 _scoreHistory.Add((float)score.TotalScore);
-            }
 
             ShowSearchWindow(score);
 
@@ -672,7 +737,8 @@ public class ExpeditionIcons : BaseSettingsPlugin<ExpeditionIconsSettings>
                     DrawCirclesInWorld([ExpandWithTerrainHeight(pos)], _explosiveRadius, Color.LightBlue);
                     Graphics.DrawLine(GetWorldScreenPosition(_editedPath[editedIndex]), GetWorldScreenPosition(pos), 1, Settings.PlannerSettings.WorldLineColor);
 
-                    if (Input.IsKeyDown(Settings.PlannerSettings.ConfirmEditorPlacementHotkey))
+                    var confirmKey = Settings.PlannerSettings.ConfirmEditorPlacementHotkey.Value;
+                    if (confirmKey?.Mode == HotkeyNodeV2.HotkeyNodeMode.Keyboard && Input.IsKeyDown((int)confirmKey.Key))
                     {
                         _editedPath[editedIndex] = pos;
                         _editedPathEval = pp.GetDetailedScore(_editedPath, score.Environment);
@@ -799,9 +865,13 @@ public class ExpeditionIcons : BaseSettingsPlugin<ExpeditionIconsSettings>
                 }
             }
 
-            ImGui.PlotLines("Score over time", ref CollectionsMarshal.AsSpan(_scoreHistory)[0],
-                _scoreHistory.Count, 0, "", 0, _scoreHistory.Max(),
-                new Vector2(0, ImGui.GetContentRegionAvail().Y));
+            if (_scoreHistory.Count > 0)
+            {
+                var maxScore = _scoreHistory.Where(float.IsFinite).DefaultIfEmpty(0f).Max();
+                ImGui.PlotLines("Score over time", ref CollectionsMarshal.AsSpan(_scoreHistory)[0],
+                    _scoreHistory.Count, 0, "", 0, maxScore,
+                    new Vector2(0, ImGui.GetContentRegionAvail().Y));
+            }
             ImGui.End();
         }
     }
@@ -864,6 +934,7 @@ public class ExpeditionIcons : BaseSettingsPlugin<ExpeditionIconsSettings>
             var point = GetEntityPosOnMapScreen(entity) + offset * halfsize * 2;
             var entityPos = entity.Pos;
             var entityPos2 = new Vector2(entityPos.X, entityPos.Y);
+            if (!float.IsFinite(halfsize) || halfsize <= 0 || !IsFinite(point) || !IsFinite(entityPos2)) return;
 
             DrawIcon(icon, color, point, entityPos2,
                 Settings.ExplosivesSettings.HideCapturedEntitiesOnMap,
@@ -881,6 +952,7 @@ public class ExpeditionIcons : BaseSettingsPlugin<ExpeditionIconsSettings>
         var entityPos = entity.Pos;
         var entityPos2 = new Vector2(entityPos.X, entityPos.Y);
         var point = Camera.WorldToScreen(entityPos) + offset * halfsize * 2;
+        if (!float.IsFinite(halfsize) || halfsize <= 0 || !IsFinite(point) || !IsFinite(entityPos2)) return;
         DrawIcon(icon, color, point, entityPos2,
             Settings.ExplosivesSettings.HideCapturedEntitiesInWorld,
             Settings.ExplosivesSettings.MarkCapturedEntitiesInWorld,
@@ -902,6 +974,7 @@ public class ExpeditionIcons : BaseSettingsPlugin<ExpeditionIconsSettings>
         int frameThickness,
         float iconSize)
     {
+        if (!float.IsFinite(iconSize) || iconSize <= 0 || !IsFinite(displayPosition) || !IsFinite(worldPosition)) return;
         var halfsize = iconSize / 2.0f;
         var rect = new RectangleF(displayPosition.X, displayPosition.Y, 0, 0);
         rect.Inflate(halfsize, halfsize);
@@ -936,25 +1009,40 @@ public class ExpeditionIcons : BaseSettingsPlugin<ExpeditionIconsSettings>
 
     private Vector2 GetMapScreenPosition(Vector2 gridPos)
     {
-        return _mapCenter + TranslateGridDeltaToMapDelta(gridPos - _playerGridPos, GameController.IngameState.Data.GetTerrainHeightAt(gridPos) - _playerZ);
+        if (!IsFinite(gridPos) || !IsFinite(_playerGridPos) || !double.IsFinite(_mapScale) || _mapScale <= 0) return new Vector2(float.NaN, float.NaN);
+        var height = GameController.IngameState.Data.GetTerrainHeightAt(gridPos);
+        if (!float.IsFinite(height)) return new Vector2(float.NaN, float.NaN);
+        return _mapCenter + TranslateGridDeltaToMapDelta(gridPos - _playerGridPos, height - _playerZ);
     }
 
     private Vector2 GetWorldScreenPosition(Vector2 gridPos)
     {
-        return Camera.WorldToScreen(ExpandWithTerrainHeight(gridPos));
+        if (!IsFinite(gridPos)) return new Vector2(float.NaN, float.NaN);
+        var screen = Camera.WorldToScreen(ExpandWithTerrainHeight(gridPos));
+        return IsFinite(screen) ? screen : new Vector2(float.NaN, float.NaN);
     }
 
     private Vector2 GetEntityPosOnMapScreen(EntityCacheItem entity)
     {
+        if (!IsFinite(entity.GridPos) || !IsFinite(_playerGridPos) || !double.IsFinite(_mapScale) || _mapScale <= 0 ||
+            !float.IsFinite(entity.RenderZ ?? 0f) || !float.IsFinite(_playerZ)) return new Vector2(float.NaN, float.NaN);
         var point = _mapCenter + TranslateGridDeltaToMapDelta(entity.GridPos - _playerGridPos, (entity.RenderZ ?? 0) - _playerZ);
-        return point;
+        return IsFinite(point) ? point : new Vector2(float.NaN, float.NaN);
     }
 
     private Vector2 TranslateGridDeltaToMapDelta(Vector2 delta, float deltaZ)
     {
+        if (!IsFinite(delta) || !float.IsFinite(deltaZ) || !double.IsFinite(_mapScale) || _mapScale <= 0)
+            return new Vector2(float.NaN, float.NaN);
         deltaZ /= GridToWorldMultiplier; //z is normally "world" units, translate to grid
         return (float)_mapScale * new Vector2((delta.X - delta.Y) * CameraAngleCos, (deltaZ - (delta.X + delta.Y)) * CameraAngleSin);
     }
+
+    private static bool IsFinite(Vector2 value)
+        => float.IsFinite(value.X) && float.IsFinite(value.Y);
+
+    private static bool IsFinite(Vector3 value)
+        => float.IsFinite(value.X) && float.IsFinite(value.Y) && float.IsFinite(value.Z);
 
     private enum ExpeditionEntityType
     {

@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Linq;
 using ExileCore2.Shared.Enums;
 using ExpeditionIcons.PathPlannerData;
@@ -246,6 +246,7 @@ public static class Icons
                 "Metadata/Terrain/Doodads/Leagues/Expedition/ChestMarkers/ChestRitual.ao"
             },
         },
+        /*
         new()
         {
             IconPickerIndex = IconPickerIndex.MetamorphChest,
@@ -255,6 +256,7 @@ public static class Icons
                 "Metadata/Terrain/Doodads/Leagues/Expedition/ChestMarkers/ChestMetamorph.ao"
             },
         },
+        */
         new()
         {
             IconPickerIndex = IconPickerIndex.MapsChest,

@@ -298,10 +298,10 @@ public class PlannerSettings
         };
     }
 
-    public HotkeyNode StartSearchHotkey { get; set; } = new HotkeyNode(Keys.F13);
-    public HotkeyNode StopSearchHotkey { get; set; } = new HotkeyNode(Keys.F13);
-    public HotkeyNode ClearSearchHotkey { get; set; } = new HotkeyNode(Keys.F13);
-    public HotkeyNode ConfirmEditorPlacementHotkey { get; set; } = new HotkeyNode(Keys.Enter);
+    public HotkeyNodeV2 StartSearchHotkey { get; set; } = new HotkeyNodeV2(Keys.F13);
+    public HotkeyNodeV2 StopSearchHotkey { get; set; } = new HotkeyNodeV2(Keys.F13);
+    public HotkeyNodeV2 ClearSearchHotkey { get; set; } = new HotkeyNodeV2(Keys.F13);
+    public HotkeyNodeV2 ConfirmEditorPlacementHotkey { get; set; } = new HotkeyNodeV2(Keys.Enter);
 
     [JsonIgnore]
     [ConditionalDisplay(nameof(IsSearchRunning), false)]
